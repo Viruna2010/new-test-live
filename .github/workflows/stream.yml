@@ -16,7 +16,7 @@ jobs:
       - name: Setup Audio, Launch Stealth Chrome and Stream
         env:
           YOUTUBE_STREAM_KEY: ${{ secrets.YOUTUBE_STREAM_KEY }}
-          TARGET_URL: "https://test-site-gray-sigma.vercel.app/"
+          TARGET_URL: "https://new-test1-beryl.vercel.app/"
         run: |
           # 1. Start Virtual Display
           Xvfb :99 -screen 0 1280x720x24 &
