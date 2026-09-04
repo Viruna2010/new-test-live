@@ -7,20 +7,27 @@ jobs:
   stream:
     runs-on: ubuntu-latest
     steps:
+      # 1. Bypass YouTube Datacenter IP Ban using Cloudflare WARP
+      - name: Set up Cloudflare WARP (Bypass Datacenter IP)
+        uses: fscarmen/warp-on-actions@v1.4
+        with:
+          stack: dual
+          mode: wireguard
+
+      # 2. Fast Install Dependencies
       - name: Fast Install Dependencies
         run: |
           sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list 2>/dev/null || true
           sudo apt-get update -qq
-          sudo apt-get install -y ffmpeg pulseaudio pulseaudio-utils xvfb libasound2-plugins
-          npm install puppeteer-core
+          sudo apt-get install -y ffmpeg pulseaudio pulseaudio-utils xvfb xdotool libasound2-plugins
 
-      - name: Setup Audio, Inject Cookies and Launch Stream
+      # 3. Setup Audio, Launch Chrome and Push Stream to YouTube
+      - name: Setup Audio, Launch TV Stream and Push to YouTube
         env:
           YOUTUBE_STREAM_KEY: ${{ secrets.YOUTUBE_STREAM_KEY }}
-          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
           TARGET_URL: "https://new-test-rho-liart.vercel.app/"
         run: |
-          # 1. Start Virtual Display
+          # 1. Start Virtual Display in 720p
           Xvfb :99 -screen 0 1280x720x24 &
           export DISPLAY=:99
           sleep 2
@@ -32,122 +39,37 @@ jobs:
           pactl set-default-sink VirtualSink
           export PULSE_SINK=VirtualSink
 
-          # 3. Create Stealth Cookie Injection Script
-          cat << 'EOF' > launch.js
-          const puppeteer = require('puppeteer-core');
+          # 3. Suppress Chrome Prompts
+          mkdir -p ~/.config/google-chrome
+          touch ~/.config/google-chrome/'First Run'
 
-          function parseAndCleanCookies(input) {
-            let raw = [];
-            input = input.trim();
-            if (input.startsWith('[') && input.endsWith(']')) {
-              raw = JSON.parse(input);
-            } else {
-              raw = input.split('\n')
-                .map(l => l.trim())
-                .filter(l => l && !l.startsWith('#'))
-                .map(l => {
-                  const parts = l.split('\t');
-                  if (parts.length < 7) return null;
-                  return {
-                    domain: parts[0],
-                    path: parts,
-                    secure: parts === 'TRUE',
-                    name: parts,
-                    value: parts[6]
-                  };
-                })
-                .filter(Boolean);
-            }
+          # 4. Launch Clean Chrome (No Automation Banners, Pure Consumer Mode)
+          echo "Launching Clean Chrome over WARP network..."
+          google-chrome \
+            --no-sandbox \
+            --no-first-run \
+            --no-default-browser-check \
+            --disable-search-engine-choice-screen \
+            --disable-dev-shm-usage \
+            --disable-blink-features=AutomationControlled \
+            --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36" \
+            --autoplay-policy=no-user-gesture-required \
+            --disable-gpu \
+            --window-size=1280,720 \
+            --window-position=0,0 \
+            --start-fullscreen \
+            --kiosk "$TARGET_URL?autoplay=1" &
 
-            return raw.map(c => {
-              const clean = {
-                name: c.name,
-                value: c.value,
-                domain: c.domain.startsWith('.') ? c.domain : '.' + c.domain,
-                path: c.path || '/',
-                secure: !!c.secure,
-                httpOnly: !!c.httpOnly
-              };
-              if (c.sameSite) {
-                const s = c.sameSite.toLowerCase();
-                if (s === 'no_restriction' || s === 'none') clean.sameSite = 'None';
-                else if (s === 'lax') clean.sameSite = 'Lax';
-                else if (s === 'strict') clean.sameSite = 'Strict';
-              }
-              if (c.expirationDate && !c.session) {
-                clean.expires = Math.floor(c.expirationDate);
-              }
-              return clean;
-            });
-          }
+          # 5. Wait for page load and trigger click to unmute
+          echo "Waiting 8 seconds for player to initialize..."
+          sleep 8
+          echo "Triggering broadcast click..."
+          xdotool search --onlyvisible --class "google-chrome" windowfocus || true
+          xdotool mousemove 640 360 click 1
+          sleep 2
 
-          (async () => {
-            try {
-              console.log("Launching Stealth Chrome...");
-              const browser = await puppeteer.launch({
-                executablePath: '/usr/bin/google-chrome',
-                headless: false,
-                defaultViewport: null,
-                ignoreDefaultArgs: ['--enable-automation'], // Removes "Chrome is being controlled by automated software" banner
-                args: [
-                  '--no-sandbox',
-                  '--disable-setuid-sandbox',
-                  '--no-first-run',
-                  '--no-default-browser-check',
-                  '--disable-dev-shm-usage',
-                  '--disable-blink-features=AutomationControlled',
-                  '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-                  '--autoplay-policy=no-user-gesture-required',
-                  '--disable-gpu',
-                  '--window-size=1280,720',
-                  '--window-position=0,0',
-                  '--start-fullscreen',
-                  '--kiosk',
-                  '--display=:99'
-                ]
-              });
-
-              const page = (await browser.pages())[0];
-              await page.setViewport({ width: 1280, height: 720 });
-
-              // 1. Inject Cookies
-              if (process.env.YOUTUBE_COOKIES) {
-                console.log("Injecting YouTube Login Cookies...");
-                try {
-                  const cookies = parseAndCleanCookies(process.env.YOUTUBE_COOKIES);
-                  await page.setCookie(...cookies);
-                  console.log(`Injected ${cookies.length} cookies!`);
-                } catch (err) {
-                  console.error("Cookie error:", err.message);
-                }
-              }
-
-              // 2. Prime YouTube Session
-              console.log("Priming YouTube session with cookies...");
-              await page.goto('https://www.youtube.com', { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-              await new Promise(r => setTimeout(r, 2000));
-
-              // 3. Load TV Broadcast Website
-              const targetUrl = process.env.TARGET_URL || 'https://new-test-rho-liart.vercel.app/';
-              console.log("Loading TV Website:", targetUrl);
-              await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 60000 });
-
-              // 4. Click screen to start audio
-              await new Promise(r => setTimeout(r, 3000));
-              await page.mouse.click(640, 360);
-              console.log("Broadcast active and playing!");
-            } catch (error) {
-              console.error("Browser launch error:", error);
-            }
-          })();
-          EOF
-
-          # 4. Run Chrome in background
-          node launch.js &
-          sleep 12
-
-          # 5. Stream 720p @ 30 FPS to YouTube Live
-          echo "Starting FFmpeg live stream..."
+          # 6. High-Quality 30 FPS Stream to YouTube Live
+          echo "Streaming 720p @ 30 FPS to YouTube Live..."
           ffmpeg -hide_banner -loglevel warning \
             -thread_queue_size 512 -f x11grab -draw_mouse 0 -video_size 1280x720 -framerate 30 -i :99.0 \
             -thread_queue_size 512 -f pulse -i VirtualSink.monitor \
