@@ -1,7 +1,7 @@
 name: Stream VIRU Radio to YouTube Live
 
 on:
-  workflow_dispatch: # Actions tab eken manual run karanna
+  workflow_dispatch:
 
 jobs:
   stream:
@@ -9,26 +9,21 @@ jobs:
     steps:
       - name: Fast Install Dependencies
         run: |
-          # 1. Fast mirror (Fixes slow Azure download bottleneck)
           sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list 2>/dev/null || true
-          
-          # 2. Install FFmpeg, PulseAudio, Xvfb, xdotool and Audio Bridge
           sudo apt-get update -qq
           sudo apt-get install -y ffmpeg pulseaudio pulseaudio-utils xvfb xdotool libasound2-plugins
 
-      - name: Setup Audio, Launch TV Stream and Push to YouTube
+      - name: Setup Audio, Launch Stealth Chrome and Stream
         env:
           YOUTUBE_STREAM_KEY: ${{ secrets.YOUTUBE_STREAM_KEY }}
-          TARGET_URL: "https://new-test1-beryl.vercel.app/"
+          TARGET_URL: "https://test-site-gray-sigma.vercel.app/"
         run: |
-          # 1. Start Virtual Display in 720p (1280x720)
-          echo "Starting 720p Virtual Display..."
+          # 1. Start Virtual Display
           Xvfb :99 -screen 0 1280x720x24 &
           export DISPLAY=:99
           sleep 2
 
-          # 2. Setup Virtual Audio Sink via PulseAudio
-          echo "Configuring PulseAudio Virtual Sink..."
+          # 2. Setup Virtual Audio Sink
           pulseaudio --start --exit-idle-time=-1
           sleep 2
           pactl load-module module-null-sink sink_name=VirtualSink sink_properties=device.description=VirtualSink
@@ -39,15 +34,16 @@ jobs:
           mkdir -p ~/.config/google-chrome
           touch ~/.config/google-chrome/'First Run'
 
-          # 4. Launch Google Chrome with Unrestricted Autoplay
-          echo "Launching Google Chrome in Kiosk Mode..."
+          # 4. Launch Chrome in STEALTH MODE (Bypasses "Sign in to confirm you're not a bot")
+          echo "Launching Stealth Google Chrome..."
           google-chrome \
             --no-sandbox \
             --no-first-run \
             --no-default-browser-check \
             --disable-search-engine-choice-screen \
-            --test-type \
             --disable-dev-shm-usage \
+            --disable-blink-features=AutomationControlled \
+            --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36" \
             --autoplay-policy=no-user-gesture-required \
             --disable-infobars \
             --disable-gpu \
@@ -56,15 +52,13 @@ jobs:
             --start-fullscreen \
             --kiosk "$TARGET_URL?autoplay=1" &
 
-          # 5. Wait 8s for YouTube IFrame to initialize, then click to unlock audio & clear splash
-          echo "Waiting 8 seconds for site and player to load..."
+          # 5. Wait for page load and trigger click
           sleep 8
-          echo "Triggering automated click to start broadcast..."
           xdotool search --onlyvisible --class "google-chrome" windowfocus || true
           xdotool mousemove 640 360 click 1
           sleep 2
 
-          # 6. High-Quality 30 FPS Stream to YouTube Live
+          # 6. Stream to YouTube Live
           echo "Streaming 720p @ 30 FPS to YouTube Live..."
           ffmpeg -hide_banner -loglevel warning \
             -thread_queue_size 512 -f x11grab -draw_mouse 0 -video_size 1280x720 -framerate 30 -i :99.0 \
