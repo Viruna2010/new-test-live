@@ -32,7 +32,7 @@ jobs:
           pactl set-default-sink VirtualSink
           export PULSE_SINK=VirtualSink
 
-          # 3. Create Cookie-Injection & Chrome Launcher Script
+          # 3. Create Stealth Cookie Injection Script
           cat << 'EOF' > launch.js
           const puppeteer = require('puppeteer-core');
 
@@ -52,14 +52,13 @@ jobs:
                     domain: parts[0],
                     path: parts,
                     secure: parts === 'TRUE',
-                    name: parts[5],
+                    name: parts,
                     value: parts[6]
                   };
                 })
                 .filter(Boolean);
             }
 
-            // Convert Chrome extension format to standard Puppeteer format
             return raw.map(c => {
               const clean = {
                 name: c.name,
@@ -84,11 +83,12 @@ jobs:
 
           (async () => {
             try {
-              console.log("Launching Chrome with Audio & Display...");
+              console.log("Launching Stealth Chrome...");
               const browser = await puppeteer.launch({
                 executablePath: '/usr/bin/google-chrome',
                 headless: false,
                 defaultViewport: null,
+                ignoreDefaultArgs: ['--enable-automation'], // Removes "Chrome is being controlled by automated software" banner
                 args: [
                   '--no-sandbox',
                   '--disable-setuid-sandbox',
@@ -110,35 +110,41 @@ jobs:
               const page = (await browser.pages())[0];
               await page.setViewport({ width: 1280, height: 720 });
 
-              // Inject YouTube Login Cookies into Chrome Session
+              // 1. Inject Cookies
               if (process.env.YOUTUBE_COOKIES) {
                 console.log("Injecting YouTube Login Cookies...");
                 try {
                   const cookies = parseAndCleanCookies(process.env.YOUTUBE_COOKIES);
                   await page.setCookie(...cookies);
-                  console.log(`Successfully injected ${cookies.length} cookies into YouTube!`);
+                  console.log(`Injected ${cookies.length} cookies!`);
                 } catch (err) {
                   console.error("Cookie error:", err.message);
                 }
               }
 
+              // 2. Prime YouTube Session
+              console.log("Priming YouTube session with cookies...");
+              await page.goto('https://www.youtube.com', { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+              await new Promise(r => setTimeout(r, 2000));
+
+              // 3. Load TV Broadcast Website
               const targetUrl = process.env.TARGET_URL || 'https://new-test-rho-liart.vercel.app/';
               console.log("Loading TV Website:", targetUrl);
               await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 60000 });
 
-              // Auto-Click to start broadcast audio & clear splash
-              await new Promise(r => setTimeout(r, 4000));
+              // 4. Click screen to start audio
+              await new Promise(r => setTimeout(r, 3000));
               await page.mouse.click(640, 360);
-              console.log("Broadcast unmuted and live!");
+              console.log("Broadcast active and playing!");
             } catch (error) {
               console.error("Browser launch error:", error);
             }
           })();
           EOF
 
-          # 4. Run Chrome in background with cookies
+          # 4. Run Chrome in background
           node launch.js &
-          sleep 9
+          sleep 12
 
           # 5. Stream 720p @ 30 FPS to YouTube Live
           echo "Starting FFmpeg live stream..."
