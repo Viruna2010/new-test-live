@@ -25,7 +25,7 @@ jobs:
       - name: Setup Audio, Launch TV Stream and Push to YouTube
         env:
           YOUTUBE_STREAM_KEY: ${{ secrets.YOUTUBE_STREAM_KEY }}
-          TARGET_URL: "https://new-test-rho-liart.vercel.app/"
+          TARGET_URL: "https://original-site-orpin.vercel.app/"
         run: |
           # 1. Start Virtual Display in 720p
           Xvfb :99 -screen 0 1280x720x24 &
